@@ -803,7 +803,7 @@
             try {
                 const response = await fetch('/api/conversations');
                 const data = await response.json();
-                currentConversationId = data.current_id;
+                // NIE nadpisujemy currentConversationId - zachowujemy aktywną rozmowę
                 renderConversations(data.conversations);
             } catch (error) {
                 console.error('Error loading conversations:', error);
