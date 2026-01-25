@@ -739,6 +739,9 @@
         .feedback-actions button.mark-resolved:hover {
             background: #16a34a;
         }
+        .feedback-actions button:hover[style*="error"] {
+            background: #dc2626 !important;
+        }
 
         /* Scrollbar */
         ::-webkit-scrollbar { width: 6px; }
@@ -1516,6 +1519,7 @@
                             ${fb.status === 'read' ? `
                                 <button class="mark-resolved" onclick="markFeedbackResolved(${fb.id})">✓ Rozwiązane</button>
                             ` : ''}
+                            <button onclick="deleteFeedback(${fb.id})" style="background: var(--error); color: white; border-color: var(--error);">🗑️ Usuń</button>
                         </div>
                     </div>
                 `;
@@ -1537,6 +1541,21 @@
                 await loadFeedbackList();
             } catch (error) {
                 alert('Błąd');
+            }
+        }
+        
+        async function deleteFeedback(id) {
+            if (!confirm('Na pewno chcesz usunąć ten feedback? Tej operacji nie można cofnąć.')) return;
+            
+            try {
+                const response = await fetch(`/api/feedback/${id}`, { method: 'DELETE' });
+                if (response.ok) {
+                    await loadFeedbackList();
+                } else {
+                    alert('Błąd usuwania');
+                }
+            } catch (error) {
+                alert('Błąd połączenia');
             }
         }
         

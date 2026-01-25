@@ -747,6 +747,21 @@ def mark_feedback_resolved(feedback_id):
     return jsonify({'status': 'ok'})
 
 
+@app.route('/api/feedback/<int:feedback_id>', methods=['DELETE'])
+@login_required
+def delete_feedback(feedback_id):
+    """Usuwa feedback (tylko dla admina)."""
+    admin_email = os.getenv('ADMIN_EMAIL', 'mateuszmalekto@gmail.com')
+    if current_user.email.lower() != admin_email.lower():
+        return jsonify({'error': 'Brak uprawnień'}), 403
+    
+    feedback = Feedback.query.get_or_404(feedback_id)
+    db.session.delete(feedback)
+    db.session.commit()
+    
+    return jsonify({'status': 'ok'})
+
+
 # === RUN ===
 
 def run_server(port=5000, debug=False):
