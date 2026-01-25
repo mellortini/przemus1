@@ -163,32 +163,47 @@ def append_to_memory(user, entry):
         db.session.commit()
 
 
-def extract_memory_from_conversation(user_msg, assistant_msg, provider='groq', api_key=None):
-    """Wyciąga istotne informacje z rozmowy do pamięci."""
-    prompt = f"""Przeanalizuj tę wymianę i wyciągnij TYLKO istotne, trwałe informacje o użytkowniku.
-Zwróć maksymalnie 2-3 wpisy, tylko jeśli są naprawdę istotne.
+def extract_memory_from_conversation(user_msg, assistant_msg, existing_memory='', provider='groq', api_key=None):
+    """Wyciąga istotne informacje z rozmowy do pamięci (bez duplikatów)."""
+    
+    # Pokaż LLM co już wie, żeby nie powtarzał
+    memory_context = ""
+    if existing_memory and existing_memory.strip():
+        # Wyciągnij tylko wpisy [TAG], bez dat
+        existing_facts = []
+        for line in existing_memory.split('\n'):
+            line = line.strip()
+            if line.startswith('['):
+                existing_facts.append(line)
+        if existing_facts:
+            memory_context = f"""
+CO JUŻ WIEM O UŻYTKOWNIKU (NIE POWTARZAJ TEGO):
+{chr(10).join(existing_facts[-20:])}
+
+"""
+    
+    prompt = f"""{memory_context}Przeanalizuj tę wymianę i wyciągnij TYLKO NOWE, istotne informacje o użytkowniku.
+
+WAŻNE:
+- NIE powtarzaj informacji które już znam (pokazane wyżej)
+- Jeśli informacja jest semantycznie taka sama (np. "ma na imię X" vs "nazywa się X"), NIE dodawaj
+- Zwróć TYLKO naprawdę NOWE fakty
+- Jeśli nie ma nic nowego, zwróć pustą odpowiedź
+
 Format: [TAG] informacja
-
-Tagi:
-[FACT] - fakty o użytkowniku (zawód, hobby, umiejętności)
-[PREF] - preferencje użytkownika
-[TODO] - zadania do zrobienia
-[DECISION] - ważne decyzje
-
-Jeśli nie ma nic istotnego, zwróć pustą odpowiedź.
+Tagi: [FACT], [PREF], [TODO], [DECISION]
 
 Użytkownik: {user_msg}
 Asystent: {assistant_msg}
 
-Wyciągnięte informacje:"""
+Nowe informacje (lub pusta odpowiedź):"""
 
     try:
-        # Użyj klucza z env jeśli nie podano
         if not api_key:
             api_key = os.getenv('LLM_API_KEY')
         
         result = ask_llm([
-            {"role": "system", "content": "Jesteś modułem ekstrakcji pamięci. Bądź bardzo selektywny."},
+            {"role": "system", "content": "Jesteś modułem ekstrakcji pamięci. Wyciągaj TYLKO nowe informacje, których jeszcze nie znasz. Bądź BARDZO selektywny."},
             {"role": "user", "content": prompt}
         ], provider=provider, api_key=api_key)
         return result.strip()
@@ -287,9 +302,13 @@ def chat():
         conv.messages = messages
         db.session.commit()
         
-        # Wyciągnij pamięć w tle
+        # Wyciągnij pamięć w tle (przekaż istniejącą pamięć żeby nie było duplikatów)
         try:
-            memory_entry = extract_memory_from_conversation(user_message, response, provider=provider, api_key=user_api_key)
+            memory_entry = extract_memory_from_conversation(
+                user_message, response, 
+                existing_memory=current_user.memory or '',
+                provider=provider, api_key=user_api_key
+            )
             if memory_entry and memory_entry.strip():
                 append_to_memory(current_user, memory_entry)
         except:
