@@ -108,16 +108,59 @@ def delete_memory_by_keyword(user, keyword):
 
 
 def append_to_memory(user, entry):
-    """Dodaje wpis do pamięci użytkownika."""
+    """Dodaje wpis do pamięci użytkownika (bez duplikatów)."""
     from datetime import datetime
     today = datetime.now().strftime('%Y-%m-%d')
     
-    # Sprawdź czy mamy nagłówek dla dzisiejszego dnia
-    if f'### {today}' not in user.memory:
-        user.memory += f'\n### {today}\n'
+    if not entry or not entry.strip():
+        return
     
-    user.memory += entry + '\n'
-    db.session.commit()
+    # Wyciągnij istniejące fakty z pamięci (bez dat)
+    existing_facts = set()
+    for line in user.memory.split('\n'):
+        line = line.strip()
+        if line.startswith('['):
+            # Normalizuj: usuń tagi i sprowadź do małych liter
+            clean = line.lower()
+            for tag in ['[fact]', '[pref]', '[todo]', '[decision]']:
+                clean = clean.replace(tag, '')
+            existing_facts.add(clean.strip())
+    
+    # Filtruj nowe wpisy - dodaj tylko te których jeszcze nie ma
+    new_entries = []
+    for line in entry.split('\n'):
+        line = line.strip()
+        if not line or not line.startswith('['):
+            continue
+        
+        clean = line.lower()
+        for tag in ['[fact]', '[pref]', '[todo]', '[decision]']:
+            clean = clean.replace(tag, '')
+        clean = clean.strip()
+        
+        # Sprawdź czy podobny fakt już istnieje
+        is_duplicate = False
+        for existing in existing_facts:
+            # Prosta heurystyka: jeśli >70% słów się pokrywa, to duplikat
+            new_words = set(clean.split())
+            exist_words = set(existing.split())
+            if len(new_words) > 0 and len(exist_words) > 0:
+                overlap = len(new_words & exist_words) / max(len(new_words), len(exist_words))
+                if overlap > 0.7:
+                    is_duplicate = True
+                    break
+        
+        if not is_duplicate:
+            new_entries.append(line)
+            existing_facts.add(clean)
+    
+    # Dodaj tylko nowe, unikalne wpisy
+    if new_entries:
+        if f'### {today}' not in user.memory:
+            user.memory += f'\n### {today}\n'
+        
+        user.memory += '\n'.join(new_entries) + '\n'
+        db.session.commit()
 
 
 def extract_memory_from_conversation(user_msg, assistant_msg, provider='groq', api_key=None):
