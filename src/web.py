@@ -27,8 +27,19 @@ app = Flask(__name__, template_folder='../templates', static_folder='../static')
 # Fix dla proxy (Railway, Heroku, etc.) - poprawia generowanie URL
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-# Konfiguracja
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATA_DIR / "przemus.db"}'
+# Konfiguracja bazy danych
+# Na produkcji używa PostgreSQL (DATABASE_URL), lokalnie SQLite
+import os
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL:
+    # Railway PostgreSQL - zamień postgres:// na postgresql:// (SQLAlchemy wymaga)
+    if DATABASE_URL.startswith('postgres://'):
+        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+else:
+    # Lokalnie - SQLite
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATA_DIR / "przemus.db"}'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['PREFERRED_URL_SCHEME'] = 'https'
 
