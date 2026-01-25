@@ -676,6 +676,103 @@ def get_user():
     return jsonify({'logged_in': False})
 
 
+# === API: SEARCH ===
+
+@app.route('/api/search', methods=['GET'])
+@login_required
+def search():
+    """Wyszukuje w rozmowach i pamięci użytkownika."""
+    query = request.args.get('q', '').strip()
+    scope = request.args.get('scope', 'all')  # conversations, memory, all
+    date_from = request.args.get('date_from', '')
+    
+    if not query:
+        return jsonify({'results': []})
+    
+    results = []
+    query_lower = query.lower()
+    
+    # Wyszukiwanie w rozmowach
+    if scope in ['conversations', 'all']:
+        conversations = Conversation.query.filter_by(user_id=current_user.id).all()
+        
+        for conv in conversations:
+            # Sprawdź datę
+            if date_from:
+                from datetime import datetime as dt
+                try:
+                    date_obj = dt.strptime(date_from, '%Y-%m-%d').date()
+                    if conv.created_at.date() < date_obj:
+                        continue
+                except:
+                    pass
+            
+            messages = conv.messages
+            for msg_idx, msg in enumerate(messages):
+                # Odszyfruj wiadomość
+                content = decrypt_for_user(msg.get('content', ''), current_user.id)
+                
+                if query_lower in content.lower():
+                    # Znajdź kontekst (fragment z zapytaniem)
+                    content_lower = content.lower()
+                    idx = content_lower.find(query_lower)
+                    start = max(0, idx - 50)
+                    end = min(len(content), idx + len(query) + 50)
+                    preview = content[start:end]
+                    if start > 0:
+                        preview = '...' + preview
+                    if end < len(content):
+                        preview = preview + '...'
+                    
+                    results.append({
+                        'type': 'conversation',
+                        'conversation_id': conv.id,
+                        'message_id': msg_idx,
+                        'title': decrypt_for_user(conv.title, current_user.id),
+                        'preview': preview,
+                        'date': conv.updated_at.isoformat(),
+                        'query': query
+                    })
+    
+    # Wyszukiwanie w pamięci
+    if scope in ['memory', 'all']:
+        memory_content = current_user.memory or ''
+        lines = memory_content.split('\n')
+        
+        for line_idx, line in enumerate(lines):
+            if query_lower in line.lower():
+                # Sprawdź datę w linii (format: YYYY-MM-DD)
+                if date_from:
+                    if date_from not in line:
+                        continue
+                
+                preview = line
+                if len(preview) > 150:
+                    idx = preview.lower().find(query_lower)
+                    start = max(0, idx - 50)
+                    end = min(len(preview), idx + len(query) + 50)
+                    preview = preview[start:end]
+                    if start > 0:
+                        preview = '...' + preview
+                    if end < len(line):
+                        preview = preview + '...'
+                
+                results.append({
+                    'type': 'memory',
+                    'conversation_id': None,
+                    'message_id': line_idx,
+                    'title': 'Pamięć Przemusia',
+                    'preview': preview,
+                    'date': datetime.utcnow().isoformat(),  # Memory nie ma daty per wpis
+                    'query': query
+                })
+    
+    # Sortuj po dacie (najnowsze pierwsze)
+    results.sort(key=lambda x: x['date'], reverse=True)
+    
+    return jsonify({'results': results})
+
+
 # === API: FEEDBACK ===
 
 @app.route('/api/feedback', methods=['POST'])

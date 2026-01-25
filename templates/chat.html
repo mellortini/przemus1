@@ -749,6 +749,77 @@
         ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--border); }
 
+        /* Search */
+        .search-section {
+            margin-bottom: 15px;
+        }
+        .search-wrapper {
+            position: relative;
+            display: flex;
+            gap: 5px;
+        }
+        .search-input {
+            flex: 1;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: var(--bg-secondary);
+        }
+        .search-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .search-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .search-result {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+        }
+        .search-result:hover {
+            background: var(--bg-hover);
+            border-left-color: var(--accent);
+        }
+        .search-result-title {
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .search-result-preview {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+        .search-result-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .search-highlight {
+            background: rgba(99, 102, 241, 0.3);
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+
         @media (max-width: 768px) { .sidebar { display: none; } }
     </style>
 </head>
@@ -777,6 +848,23 @@
             <span>⚙️</span>
             <span>Ustawienia</span>
         </button>
+        
+        <!-- Wyszukiwarka -->
+        <div class="search-section" style="margin-bottom: 15px;">
+            <div class="search-wrapper" style="position: relative;">
+                <input 
+                    type="text" 
+                    id="search-input" 
+                    class="search-input" 
+                    placeholder="🔍 Szukaj w rozmowach..."
+                    onkeydown="handleSearchKeyDown(event)"
+                    oninput="handleSearchInput()"
+                >
+                <button class="search-btn" onclick="openSearchPanel()" title="Zaawansowane wyszukiwanie">
+                    ⚙️
+                </button>
+            </div>
+        </div>
         
         <!-- Historia rozmów -->
         <div class="conversations-section">
@@ -834,6 +922,53 @@
             </div>
         </div>
     </main>
+
+    <!-- Search Panel -->
+    <div class="modal-overlay" id="search-modal">
+        <div class="modal" style="max-width: 800px; max-height: 85vh;">
+            <div class="modal-header">
+                <h2 class="modal-title">🔍 Wyszukiwanie</h2>
+                <button class="modal-close" onclick="closeSearchPanel()">×</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; max-height: 70vh;">
+                <!-- Filtry -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                    <div class="form-group">
+                        <label class="form-label">Szukaj w</label>
+                        <select class="form-select" id="search-scope">
+                            <option value="conversations">Rozmowy</option>
+                            <option value="memory">Pamięć</option>
+                            <option value="all">Wszędzie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Data od</label>
+                        <input type="date" class="form-input" id="search-date-from">
+                    </div>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label class="form-label">Szukaj</label>
+                    <input 
+                        type="text" 
+                        class="form-input" 
+                        id="search-query-input" 
+                        placeholder="Wpisz słowa kluczowe..."
+                        onkeydown="handleAdvancedSearchKeyDown(event)"
+                    >
+                </div>
+                
+                <button class="save-btn" onclick="performSearch()">🔍 Szukaj</button>
+                
+                <!-- Wyniki -->
+                <div id="search-results" style="margin-top: 25px;">
+                    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                        Wpisz zapytanie i kliknij "Szukaj"
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Feedback Panel -->
     <div class="modal-overlay" id="feedback-modal">
@@ -1111,8 +1246,8 @@
             }
             
             chatContainer.innerHTML = '';
-            messages.forEach(msg => {
-                addMessageToDOM(msg.content, msg.role);
+            messages.forEach((msg, idx) => {
+                addMessageToDOM(msg.content, msg.role, idx);
             });
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
@@ -1405,6 +1540,129 @@
             }
         }
         
+        // === SEARCH ===
+        
+        function handleSearchKeyDown(e) {
+            if (e.key === 'Enter') {
+                openSearchPanel();
+            }
+        }
+        
+        function handleSearchInput() {
+            const query = document.getElementById('search-input').value.trim();
+            if (query.length > 2) {
+                // Quick search - można dodać live search później
+            }
+        }
+        
+        function openSearchPanel() {
+            const quickQuery = document.getElementById('search-input').value.trim();
+            if (quickQuery) {
+                document.getElementById('search-query-input').value = quickQuery;
+            }
+            document.getElementById('search-modal').classList.add('active');
+            document.getElementById('search-query-input').focus();
+        }
+        
+        function closeSearchPanel() {
+            document.getElementById('search-modal').classList.remove('active');
+        }
+        
+        document.getElementById('search-modal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'search-modal') closeSearchPanel();
+        });
+        
+        function handleAdvancedSearchKeyDown(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        }
+        
+        async function performSearch() {
+            const query = document.getElementById('search-query-input').value.trim();
+            const scope = document.getElementById('search-scope').value;
+            const dateFrom = document.getElementById('search-date-from').value;
+            
+            if (!query) {
+                alert('Wpisz zapytanie');
+                return;
+            }
+            
+            const resultsContainer = document.getElementById('search-results');
+            resultsContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Szukam...</div>';
+            
+            try {
+                const params = new URLSearchParams({
+                    q: query,
+                    scope: scope
+                });
+                if (dateFrom) params.append('date_from', dateFrom);
+                
+                const response = await fetch(`/api/search?${params}`);
+                const data = await response.json();
+                renderSearchResults(data.results || []);
+            } catch (error) {
+                resultsContainer.innerHTML = '<div class="memory-empty">Błąd wyszukiwania</div>';
+            }
+        }
+        
+        function renderSearchResults(results) {
+            const container = document.getElementById('search-results');
+            
+            if (results.length === 0) {
+                container.innerHTML = '<div class="memory-empty">🔍 Nie znaleziono wyników</div>';
+                return;
+            }
+            
+            container.innerHTML = `
+                <div style="margin-bottom: 15px; color: var(--text-secondary); font-size: 14px;">
+                    Znaleziono ${results.length} wynik${results.length === 1 ? '' : 'ów'}
+                </div>
+                ${results.map(result => {
+                    const highlighted = highlightText(result.preview, result.query);
+                    const date = new Date(result.date).toLocaleString('pl-PL');
+                    
+                    return `
+                        <div class="search-result" onclick="openSearchResult('${result.conversation_id}', '${result.message_id}')">
+                            <div class="search-result-title">${escapeHtml(result.title || 'Rozmowa')}</div>
+                            <div class="search-result-preview">${highlighted}</div>
+                            <div class="search-result-meta">${date} • ${result.type === 'conversation' ? '💬 Rozmowa' : '🧠 Pamięć'}</div>
+                        </div>
+                    `;
+                }).join('')}
+            `;
+        }
+        
+        function highlightText(text, query) {
+            if (!query) return escapeHtml(text);
+            const regex = new RegExp(`(${query})`, 'gi');
+            return escapeHtml(text).replace(regex, '<span class="search-highlight">$1</span>');
+        }
+        
+        async function openSearchResult(conversationId, messageId) {
+            closeSearchPanel();
+            
+            // Otwórz rozmowę
+            if (conversationId) {
+                await selectConversation(conversationId);
+                // Scroll do konkretnej wiadomości jeśli messageId
+                setTimeout(() => {
+                    const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+                    if (messageEl) {
+                        messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        messageEl.style.background = 'rgba(99, 102, 241, 0.2)';
+                        messageEl.style.borderRadius = '8px';
+                        setTimeout(() => {
+                            messageEl.style.background = '';
+                        }, 3000);
+                    }
+                }, 500);
+            } else {
+                // Jeśli to pamięć, otwórz panel pamięci
+                openMemoryPanel();
+            }
+        }
+        
         // === FEEDBACK PANEL ===
         
         let isAdmin = false;
@@ -1613,11 +1871,14 @@
             if (ws) ws.style.display = 'none';
         }
         
-        function addMessageToDOM(content, role) {
+        function addMessageToDOM(content, role, messageId = null) {
             hideWelcome();
             
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
+            if (messageId !== null) {
+                messageDiv.setAttribute('data-message-id', messageId);
+            }
             
             const avatar = role === 'user' ? '👤' : '🤖';
             
