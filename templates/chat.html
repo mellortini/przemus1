@@ -760,46 +760,6 @@
         </div>
     </div>
 
-    <!-- Privacy PIN Modal -->
-    <div class="modal-overlay" id="pin-modal">
-        <div class="modal" style="max-width: 400px;">
-            <div class="modal-header">
-                <h2 class="modal-title">🔐 PIN Prywatności</h2>
-            </div>
-            <div class="modal-body">
-                <p style="color: var(--text-secondary); margin-bottom: 20px; line-height: 1.6;">
-                    Ustaw PIN do szyfrowania rozmów.<br>
-                    <strong style="color: var(--success);">Tylko Ty</strong> będziesz mógł je odczytać.<br>
-                    <span style="color: var(--text-muted); font-size: 13px;">Admin serwera widzi tylko zaszyfrowane dane.</span>
-                </p>
-                
-                <div class="form-group">
-                    <label class="form-label">Twój PIN (min. 4 znaki)</label>
-                    <input type="password" class="form-input" id="pin-input" placeholder="••••••" 
-                           style="font-size: 24px; text-align: center; letter-spacing: 8px;"
-                           maxlength="20">
-                </div>
-                
-                <div class="form-group" id="pin-confirm-group" style="display: none;">
-                    <label class="form-label">Potwierdź PIN</label>
-                    <input type="password" class="form-input" id="pin-confirm" placeholder="••••••"
-                           style="font-size: 24px; text-align: center; letter-spacing: 8px;"
-                           maxlength="20">
-                </div>
-                
-                <p id="pin-error" style="color: var(--error); font-size: 13px; margin-bottom: 10px; display: none;"></p>
-                
-                <button class="save-btn" id="pin-submit-btn" onclick="submitPin()" style="width: 100%;">
-                    Kontynuuj
-                </button>
-                
-                <p style="color: var(--text-muted); font-size: 12px; margin-top: 15px; text-align: center;">
-                    ⚠️ Zapamiętaj PIN! Bez niego nie odczytasz starych rozmów.
-                </p>
-            </div>
-        </div>
-    </div>
-
     <script>
         const chatContainer = document.getElementById('chat-container');
         const messageInput = document.getElementById('message-input');
@@ -810,174 +770,11 @@
         let providers = {};
         let currentSettings = {};
         let currentConversationId = null;
-        let encryptionKey = null; // Klucz szyfrowania w pamięci
         
-        // === SZYFROWANIE (Web Crypto API) ===
-        
-        async function deriveKey(pin, salt) {
-            const encoder = new TextEncoder();
-            const keyMaterial = await crypto.subtle.importKey(
-                'raw', encoder.encode(pin), 'PBKDF2', false, ['deriveKey']
-            );
-            return await crypto.subtle.deriveKey(
-                { name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' },
-                keyMaterial,
-                { name: 'AES-GCM', length: 256 },
-                false,
-                ['encrypt', 'decrypt']
-            );
-        }
-        
-        async function encryptMessage(text) {
-            if (!encryptionKey || !text) return text;
-            try {
-                const encoder = new TextEncoder();
-                const iv = crypto.getRandomValues(new Uint8Array(12));
-                const encrypted = await crypto.subtle.encrypt(
-                    { name: 'AES-GCM', iv }, encryptionKey, encoder.encode(text)
-                );
-                // Format: iv:ciphertext (base64)
-                const ivB64 = btoa(String.fromCharCode(...iv));
-                const ctB64 = btoa(String.fromCharCode(...new Uint8Array(encrypted)));
-                return `🔒${ivB64}:${ctB64}`;
-            } catch (e) {
-                console.error('Encryption error:', e);
-                return text;
-            }
-        }
-        
-        async function decryptMessage(text) {
-            if (!encryptionKey || !text || !text.startsWith('🔒')) return text;
-            try {
-                const parts = text.slice(2).split(':');
-                if (parts.length !== 2) return text;
-                
-                const iv = Uint8Array.from(atob(parts[0]), c => c.charCodeAt(0));
-                const ciphertext = Uint8Array.from(atob(parts[1]), c => c.charCodeAt(0));
-                
-                const decrypted = await crypto.subtle.decrypt(
-                    { name: 'AES-GCM', iv }, encryptionKey, ciphertext
-                );
-                return new TextDecoder().decode(decrypted);
-            } catch (e) {
-                console.error('Decryption error:', e);
-                return '[🔒 Nie można odszyfrować - sprawdź PIN]';
-            }
-        }
-        
-        function getPinHash() {
-            return localStorage.getItem('przemus_pin_hash');
-        }
-        
-        function setPinHash(hash) {
-            localStorage.setItem('przemus_pin_hash', hash);
-        }
-        
-        async function hashPin(pin) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(pin + '_przemus_salt');
-            const hash = await crypto.subtle.digest('SHA-256', data);
-            return btoa(String.fromCharCode(...new Uint8Array(hash)));
-        }
-        
-        async function initEncryption(pin) {
-            const salt = 'przemus_user_' + (localStorage.getItem('przemus_user_id') || 'default');
-            encryptionKey = await deriveKey(pin, salt);
-        }
-        
-        // === PIN MODAL ===
-        
-        let isNewPin = false;
-        
-        function showPinModal(isNew = false) {
-            isNewPin = isNew;
-            document.getElementById('pin-modal').classList.add('active');
-            document.getElementById('pin-confirm-group').style.display = isNew ? 'block' : 'none';
-            document.getElementById('pin-submit-btn').textContent = isNew ? 'Ustaw PIN' : 'Odblokuj';
-            document.getElementById('pin-input').value = '';
-            document.getElementById('pin-confirm').value = '';
-            document.getElementById('pin-error').style.display = 'none';
-            document.getElementById('pin-input').focus();
-        }
-        
-        function closePinModal() {
-            document.getElementById('pin-modal').classList.remove('active');
-        }
-        
-        async function submitPin() {
-            const pin = document.getElementById('pin-input').value;
-            const pinError = document.getElementById('pin-error');
-            
-            if (pin.length < 4) {
-                pinError.textContent = 'PIN musi mieć minimum 4 znaki';
-                pinError.style.display = 'block';
-                return;
-            }
-            
-            if (isNewPin) {
-                const confirm = document.getElementById('pin-confirm').value;
-                if (pin !== confirm) {
-                    pinError.textContent = 'PINy nie są takie same';
-                    pinError.style.display = 'block';
-                    return;
-                }
-                // Zapisz hash PINu
-                const hash = await hashPin(pin);
-                setPinHash(hash);
-            } else {
-                // Sprawdź PIN
-                const hash = await hashPin(pin);
-                if (hash !== getPinHash()) {
-                    pinError.textContent = 'Nieprawidłowy PIN';
-                    pinError.style.display = 'block';
-                    return;
-                }
-            }
-            
-            // Inicjalizuj szyfrowanie
-            await initEncryption(pin);
-            closePinModal();
-            
-            // Przeładuj rozmowy (teraz będą odszyfrowane)
-            if (currentConversationId) {
-                selectConversation(currentConversationId);
-            }
-        }
-        
-        // Enter w polu PIN
-        document.getElementById('pin-input')?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                if (isNewPin) {
-                    document.getElementById('pin-confirm').focus();
-                } else {
-                    submitPin();
-                }
-            }
-        });
-        document.getElementById('pin-confirm')?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') submitPin();
-        });
-        
-        // === INIT ===
-        
-        async function initApp() {
-            await loadUser();
-            loadSettings();
-            
-            // Sprawdź czy user ma PIN
-            const pinHash = getPinHash();
-            if (!pinHash) {
-                // Nowy user - ustaw PIN
-                showPinModal(true);
-            } else {
-                // Istniejący user - poproś o PIN
-                showPinModal(false);
-            }
-            
-            loadConversations();
-        }
-        
-        initApp();
+        // Init
+        loadUser();
+        loadSettings();
+        loadConversations();
         
         // === USER ===
         
@@ -1093,7 +890,7 @@
             }
         }
         
-        async function renderMessages(messages) {
+        function renderMessages(messages) {
             if (!messages || messages.length === 0) {
                 chatContainer.innerHTML = `
                     <div class="welcome-screen" id="welcome-screen">
@@ -1106,16 +903,9 @@
             }
             
             chatContainer.innerHTML = '';
-            
-            // Odszyfruj każdą wiadomość
-            for (const msg of messages) {
-                // Użyj zaszyfrowanej wersji jeśli istnieje, inaczej plaintext
-                const content = msg.content_encrypted 
-                    ? await decryptMessage(msg.content_encrypted)
-                    : msg.content;
-                addMessageToDOM(content, msg.role);
-            }
-            
+            messages.forEach(msg => {
+                addMessageToDOM(msg.content, msg.role);
+            });
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
         
@@ -1373,12 +1163,6 @@
             const message = messageInput.value.trim();
             if (!message || isLoading) return;
             
-            // Sprawdź czy mamy PIN
-            if (!encryptionKey) {
-                showPinModal(getPinHash() ? false : true);
-                return;
-            }
-            
             isLoading = true;
             sendBtn.disabled = true;
             
@@ -1389,17 +1173,10 @@
             addLoading();
             
             try {
-                // Szyfruj wiadomość do przechowania w DB
-                const encryptedMessage = await encryptMessage(message);
-                
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        message: message, // plaintext dla LLM
-                        message_encrypted: encryptedMessage, // zaszyfrowane do DB
-                        conversation_id: currentConversationId 
-                    })
+                    body: JSON.stringify({ message, conversation_id: currentConversationId })
                 });
                 
                 const data = await response.json();
@@ -1410,17 +1187,7 @@
                 } else {
                     addMessageToDOM(data.response, 'assistant');
                     
-                    // Wyślij zaszyfrowaną odpowiedź do zapisania
-                    const encryptedResponse = await encryptMessage(data.response);
-                    fetch('/api/encrypt-response', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            conversation_id: data.conversation_id,
-                            encrypted_response: encryptedResponse
-                        })
-                    });
-                    
+                    // Odśwież listę rozmów (nowy tytuł)
                     if (data.conversation_id) {
                         currentConversationId = data.conversation_id;
                         loadConversations();

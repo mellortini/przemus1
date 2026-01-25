@@ -9,3 +9,4 @@ groq
 anthropic
 gunicorn
 psycopg2-binary
+cryptography

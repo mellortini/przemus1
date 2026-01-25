@@ -15,6 +15,50 @@ import json
 
 from pathlib import Path
 from werkzeug.middleware.proxy_fix import ProxyFix
+import hashlib
+from cryptography.fernet import Fernet
+import base64
+
+# === SZYFROWANIE ROZMÓW ===
+# Każdy user ma unikalny klucz szyfrowania oparty na jego ID + sekretna sól
+# Admin nie może odszyfrować bez znajomości soli i pisania kodu
+
+def get_user_encryption_key(user_id: int) -> bytes:
+    """Generuje klucz szyfrowania dla usera."""
+    # Sól z zmiennej środowiskowej (lub domyślna dla dev)
+    salt = os.getenv('ENCRYPTION_SALT', 'przemus-dev-salt-change-in-production')
+    # Kombinacja: user_id + sól
+    key_source = f"{user_id}-{salt}-przemus-private"
+    # Generuj 32-bajtowy klucz (Fernet wymaga)
+    key_hash = hashlib.sha256(key_source.encode()).digest()
+    return base64.urlsafe_b64encode(key_hash)
+
+def encrypt_for_user(text: str, user_id: int) -> str:
+    """Szyfruje tekst dla konkretnego usera."""
+    if not text:
+        return text
+    try:
+        key = get_user_encryption_key(user_id)
+        f = Fernet(key)
+        encrypted = f.encrypt(text.encode())
+        return "🔒" + encrypted.decode()  # Prefix żeby rozpoznać zaszyfrowane
+    except Exception as e:
+        print(f"Encryption error: {e}")
+        return text
+
+def decrypt_for_user(text: str, user_id: int) -> str:
+    """Odszyfrowuje tekst dla konkretnego usera."""
+    if not text or not text.startswith("🔒"):
+        return text  # Nie zaszyfrowane
+    try:
+        key = get_user_encryption_key(user_id)
+        f = Fernet(key)
+        encrypted_data = text[2:].encode()  # Usuń prefix 🔒
+        decrypted = f.decrypt(encrypted_data)
+        return decrypted.decode()
+    except Exception as e:
+        print(f"Decryption error: {e}")
+        return "[nie można odszyfrować]"
 
 # Ścieżki
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -246,9 +290,6 @@ def chat():
         response = handle_command(user_message)
         return jsonify({'response': response, 'type': 'command'})
     
-    # Pobierz zaszyfrowaną wersję (jeśli dostępna)
-    message_encrypted = data.get('message_encrypted', '')
-    
     # Znajdź lub utwórz rozmowę
     if conversation_id:
         conv = Conversation.query.filter_by(id=conversation_id, user_id=current_user.id).first()
@@ -259,17 +300,17 @@ def chat():
         conv = Conversation(
             id=str(uuid.uuid4())[:8],
             user_id=current_user.id,
-            title='🔒 Prywatna rozmowa'  # Nie pokazuj treści w tytule
+            title=user_message[:50] + '...' if len(user_message) > 50 else user_message
         )
         db.session.add(conv)
         db.session.commit()
     
-    # Dodaj wiadomość użytkownika (zapisz TYLKO zaszyfrowaną wersję)
+    # Dodaj wiadomość użytkownika (zaszyfrowaną)
     messages = conv.messages
+    encrypted_msg = encrypt_for_user(user_message, current_user.id)
     messages.append({
         "role": "user", 
-        "content": "[zaszyfrowane]",  # Placeholder dla admina
-        "content_encrypted": message_encrypted or user_message  # Zaszyfrowane dla usera
+        "content": encrypted_msg
     })
     
     try:
@@ -285,9 +326,10 @@ def chat():
         if current_user.profile:
             context.append({"role": "system", "content": f"Profil użytkownika:\n{current_user.profile}"})
         
-        # UWAGA: Historia rozmowy jest zaszyfrowana - używamy tylko aktualnej wiadomości
-        # Kontekst z poprzednich rozmów pochodzi z pamięci (memory)
-        context.append({"role": "user", "content": user_message})
+        # Dodaj historię rozmowy (odszyfrowaną dla LLM)
+        for msg in messages[-10:]:
+            decrypted_content = decrypt_for_user(msg.get('content', ''), current_user.id)
+            context.append({"role": msg['role'], "content": decrypted_content})
         
         # Pobierz ustawienia użytkownika
         settings = current_user.settings
@@ -305,12 +347,11 @@ def chat():
         response = ask_llm(context, provider=provider, model=model, 
                           api_key=user_api_key)
         
-        # Zapisz odpowiedź (placeholder - klient przyśle zaszyfrowaną wersję)
+        # Zapisz zaszyfrowaną odpowiedź
+        encrypted_response = encrypt_for_user(response, current_user.id)
         messages.append({
             "role": "assistant", 
-            "content": "[zaszyfrowane]",  # Placeholder
-            "content_encrypted": "",  # Zostanie uzupełnione przez klienta
-            "_temp_response": response  # Tymczasowo dla klienta
+            "content": encrypted_response
         })
         conv.messages = messages
         db.session.commit()
@@ -335,34 +376,6 @@ def chat():
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/encrypt-response', methods=['POST'])
-@login_required
-def encrypt_response():
-    """Zapisuje zaszyfrowaną wersję odpowiedzi od klienta."""
-    data = request.get_json()
-    conversation_id = data.get('conversation_id')
-    encrypted_response = data.get('encrypted_response', '')
-    
-    if not conversation_id:
-        return jsonify({'error': 'Brak conversation_id'}), 400
-    
-    conv = Conversation.query.filter_by(id=conversation_id, user_id=current_user.id).first()
-    if not conv or not conv.messages:
-        return jsonify({'error': 'Nie znaleziono rozmowy'}), 404
-    
-    # Zaktualizuj ostatnią wiadomość asystenta
-    messages = conv.messages
-    if messages and messages[-1].get('role') == 'assistant':
-        messages[-1]['content_encrypted'] = encrypted_response
-        # Usuń tymczasową odpowiedź
-        if '_temp_response' in messages[-1]:
-            del messages[-1]['_temp_response']
-        conv.messages = messages
-        db.session.commit()
-    
-    return jsonify({'status': 'ok'})
 
 
 def handle_command(cmd):
@@ -455,10 +468,26 @@ def new_conversation():
 @app.route('/api/conversations/<conv_id>', methods=['GET'])
 @login_required
 def get_conversation(conv_id):
-    """Szczegóły rozmowy."""
+    """Szczegóły rozmowy (z odszyfrowanymi wiadomościami)."""
     conv = Conversation.query.filter_by(id=conv_id, user_id=current_user.id).first()
     if conv:
-        return jsonify({'conversation': conv.to_dict()})
+        # Odszyfruj wiadomości dla usera
+        decrypted_messages = []
+        for msg in conv.messages:
+            decrypted_messages.append({
+                'role': msg['role'],
+                'content': decrypt_for_user(msg.get('content', ''), current_user.id)
+            })
+        
+        return jsonify({
+            'conversation': {
+                'id': conv.id,
+                'title': conv.title,
+                'messages': decrypted_messages,
+                'created_at': conv.created_at.isoformat(),
+                'updated_at': conv.updated_at.isoformat()
+            }
+        })
     return jsonify({'error': 'Nie znaleziono'}), 404
 
 
