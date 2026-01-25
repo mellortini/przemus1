@@ -120,7 +120,7 @@ def append_to_memory(user, entry):
     db.session.commit()
 
 
-def extract_memory_from_conversation(user_msg, assistant_msg):
+def extract_memory_from_conversation(user_msg, assistant_msg, provider='groq', api_key=None):
     """Wyciąga istotne informacje z rozmowy do pamięci."""
     prompt = f"""Przeanalizuj tę wymianę i wyciągnij TYLKO istotne, trwałe informacje o użytkowniku.
 Zwróć maksymalnie 2-3 wpisy, tylko jeśli są naprawdę istotne.
@@ -140,10 +140,14 @@ Asystent: {assistant_msg}
 Wyciągnięte informacje:"""
 
     try:
+        # Użyj klucza z env jeśli nie podano
+        if not api_key:
+            api_key = os.getenv(f'{provider.upper()}_API_KEY')
+        
         result = ask_llm([
             {"role": "system", "content": "Jesteś modułem ekstrakcji pamięci. Bądź bardzo selektywny."},
             {"role": "user", "content": prompt}
-        ])
+        ], provider=provider, api_key=api_key)
         return result.strip()
     except:
         return ""
@@ -224,9 +228,15 @@ def chat():
         provider = settings.get('provider', 'groq')
         model = settings.get('model', 'llama-3.3-70b-versatile')
         
+        # Pobierz klucz API - najpierw z ustawień użytkownika, potem z env
+        user_api_key = settings.get('api_keys', {}).get(provider)
+        if not user_api_key:
+            # Fallback do zmiennych środowiskowych (klucze admina)
+            user_api_key = os.getenv(f'{provider.upper()}_API_KEY')
+        
         # Wywołaj LLM
         response = ask_llm(context, provider=provider, model=model, 
-                          api_key=settings.get('api_keys', {}).get(provider))
+                          api_key=user_api_key)
         
         # Zapisz odpowiedź
         messages.append({"role": "assistant", "content": response})
@@ -235,7 +245,7 @@ def chat():
         
         # Wyciągnij pamięć w tle
         try:
-            memory_entry = extract_memory_from_conversation(user_message, response)
+            memory_entry = extract_memory_from_conversation(user_message, response, provider=provider, api_key=user_api_key)
             if memory_entry and memory_entry.strip():
                 append_to_memory(current_user, memory_entry)
         except:
