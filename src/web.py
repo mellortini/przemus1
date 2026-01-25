@@ -14,6 +14,7 @@ from config import PROVIDERS, load_settings
 import json
 
 from pathlib import Path
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Ścieżki
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -23,9 +24,13 @@ DATA_DIR.mkdir(exist_ok=True)
 # Tworzenie aplikacji
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
 
+# Fix dla proxy (Railway, Heroku, etc.) - poprawia generowanie URL
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
 # Konfiguracja
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATA_DIR / "przemus.db"}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['PREFERRED_URL_SCHEME'] = 'https'
 
 # Inicjalizacja
 init_db(app)

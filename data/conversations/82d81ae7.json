@@ -1,0 +1,18 @@
+{
+  "id": "82d81ae7",
+  "title": "czesc",
+  "created_at": "2026-01-25T16:16:35.726345",
+  "updated_at": "2026-01-25T16:16:36.648152",
+  "messages": [
+    {
+      "role": "user",
+      "content": "czesc",
+      "timestamp": "2026-01-25T16:16:35.727345"
+    },
+    {
+      "role": "assistant",
+      "content": "Cześć! Witaj! Jestem Przemuś, twój osobisty asystent. Jak mogę Ci dziś pomóc? Chcesz omówić swoje cele, zadania czy może potrzebujesz pomocy w planowaniu Twojej pracy?",
+      "timestamp": "2026-01-25T16:16:36.648152"
+    }
+  ]
+}
