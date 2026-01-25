@@ -297,10 +297,14 @@ def chat():
         conv = None
     
     if not conv:
+        # Szyfruj tytuł (pierwsze 50 znaków wiadomości)
+        title_text = user_message[:50] + '...' if len(user_message) > 50 else user_message
+        encrypted_title = encrypt_for_user(title_text, current_user.id)
+        
         conv = Conversation(
             id=str(uuid.uuid4())[:8],
             user_id=current_user.id,
-            title=user_message[:50] + '...' if len(user_message) > 50 else user_message
+            title=encrypted_title
         )
         db.session.add(conv)
         db.session.commit()
@@ -436,13 +440,17 @@ def handle_command(cmd):
 @app.route('/api/conversations', methods=['GET'])
 @login_required
 def get_conversations():
-    """Lista rozmów użytkownika."""
+    """Lista rozmów użytkownika (z odszyfrowanymi tytułami)."""
     convs = Conversation.query.filter_by(user_id=current_user.id)\
         .order_by(Conversation.updated_at.desc()).all()
     
     return jsonify({
         'conversations': [
-            {'id': c.id, 'title': c.title, 'updated_at': c.updated_at.isoformat()}
+            {
+                'id': c.id, 
+                'title': decrypt_for_user(c.title, current_user.id),  # Odszyfruj dla usera
+                'updated_at': c.updated_at.isoformat()
+            }
             for c in convs
         ]
     })
@@ -452,15 +460,25 @@ def get_conversations():
 @login_required
 def new_conversation():
     """Tworzy nową rozmowę."""
+    encrypted_title = encrypt_for_user('Nowa rozmowa', current_user.id)
     conv = Conversation(
         id=str(uuid.uuid4())[:8],
         user_id=current_user.id,
-        title='Nowa rozmowa'
+        title=encrypted_title
     )
     db.session.add(conv)
     db.session.commit()
     
-    return jsonify({'conversation': conv.to_dict()})
+    # Zwróć z odszyfrowanym tytułem dla usera
+    return jsonify({
+        'conversation': {
+            'id': conv.id,
+            'title': 'Nowa rozmowa',  # Wiemy co to jest, nie trzeba odszyfrowywać
+            'messages': [],
+            'created_at': conv.created_at.isoformat(),
+            'updated_at': conv.updated_at.isoformat()
+        }
+    })
 
 
 @app.route('/api/conversations/<conv_id>', methods=['GET'])
@@ -480,7 +498,7 @@ def get_conversation(conv_id):
         return jsonify({
             'conversation': {
                 'id': conv.id,
-                'title': conv.title,
+                'title': decrypt_for_user(conv.title, current_user.id),  # Odszyfruj tytuł
                 'messages': decrypted_messages,
                 'created_at': conv.created_at.isoformat(),
                 'updated_at': conv.updated_at.isoformat()
