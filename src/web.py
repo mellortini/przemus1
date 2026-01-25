@@ -142,7 +142,7 @@ Wyciągnięte informacje:"""
     try:
         # Użyj klucza z env jeśli nie podano
         if not api_key:
-            api_key = os.getenv(f'{provider.upper()}_API_KEY')
+            api_key = os.getenv('LLM_API_KEY')
         
         result = ask_llm([
             {"role": "system", "content": "Jesteś modułem ekstrakcji pamięci. Bądź bardzo selektywny."},
@@ -232,7 +232,8 @@ def chat():
         user_api_key = settings.get('api_keys', {}).get(provider)
         if not user_api_key:
             # Fallback do zmiennych środowiskowych (klucze admina)
-            user_api_key = os.getenv(f'{provider.upper()}_API_KEY')
+            # Używamy LLM_API_KEY jako uniwersalny klucz
+            user_api_key = os.getenv('LLM_API_KEY')
         
         # Wywołaj LLM
         response = ask_llm(context, provider=provider, model=model, 
