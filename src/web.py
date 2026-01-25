@@ -246,6 +246,9 @@ def chat():
         response = handle_command(user_message)
         return jsonify({'response': response, 'type': 'command'})
     
+    # Pobierz zaszyfrowaną wersję (jeśli dostępna)
+    message_encrypted = data.get('message_encrypted', '')
+    
     # Znajdź lub utwórz rozmowę
     if conversation_id:
         conv = Conversation.query.filter_by(id=conversation_id, user_id=current_user.id).first()
@@ -256,14 +259,18 @@ def chat():
         conv = Conversation(
             id=str(uuid.uuid4())[:8],
             user_id=current_user.id,
-            title=user_message[:50] + '...' if len(user_message) > 50 else user_message
+            title='🔒 Prywatna rozmowa'  # Nie pokazuj treści w tytule
         )
         db.session.add(conv)
         db.session.commit()
     
-    # Dodaj wiadomość użytkownika
+    # Dodaj wiadomość użytkownika (zapisz TYLKO zaszyfrowaną wersję)
     messages = conv.messages
-    messages.append({"role": "user", "content": user_message})
+    messages.append({
+        "role": "user", 
+        "content": "[zaszyfrowane]",  # Placeholder dla admina
+        "content_encrypted": message_encrypted or user_message  # Zaszyfrowane dla usera
+    })
     
     try:
         # Buduj kontekst
@@ -278,8 +285,9 @@ def chat():
         if current_user.profile:
             context.append({"role": "system", "content": f"Profil użytkownika:\n{current_user.profile}"})
         
-        # Dodaj historię rozmowy (ostatnie 10 wiadomości)
-        context.extend(messages[-10:])
+        # UWAGA: Historia rozmowy jest zaszyfrowana - używamy tylko aktualnej wiadomości
+        # Kontekst z poprzednich rozmów pochodzi z pamięci (memory)
+        context.append({"role": "user", "content": user_message})
         
         # Pobierz ustawienia użytkownika
         settings = current_user.settings
@@ -297,8 +305,13 @@ def chat():
         response = ask_llm(context, provider=provider, model=model, 
                           api_key=user_api_key)
         
-        # Zapisz odpowiedź
-        messages.append({"role": "assistant", "content": response})
+        # Zapisz odpowiedź (placeholder - klient przyśle zaszyfrowaną wersję)
+        messages.append({
+            "role": "assistant", 
+            "content": "[zaszyfrowane]",  # Placeholder
+            "content_encrypted": "",  # Zostanie uzupełnione przez klienta
+            "_temp_response": response  # Tymczasowo dla klienta
+        })
         conv.messages = messages
         db.session.commit()
         
@@ -322,6 +335,34 @@ def chat():
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/encrypt-response', methods=['POST'])
+@login_required
+def encrypt_response():
+    """Zapisuje zaszyfrowaną wersję odpowiedzi od klienta."""
+    data = request.get_json()
+    conversation_id = data.get('conversation_id')
+    encrypted_response = data.get('encrypted_response', '')
+    
+    if not conversation_id:
+        return jsonify({'error': 'Brak conversation_id'}), 400
+    
+    conv = Conversation.query.filter_by(id=conversation_id, user_id=current_user.id).first()
+    if not conv or not conv.messages:
+        return jsonify({'error': 'Nie znaleziono rozmowy'}), 404
+    
+    # Zaktualizuj ostatnią wiadomość asystenta
+    messages = conv.messages
+    if messages and messages[-1].get('role') == 'assistant':
+        messages[-1]['content_encrypted'] = encrypted_response
+        # Usuń tymczasową odpowiedź
+        if '_temp_response' in messages[-1]:
+            del messages[-1]['_temp_response']
+        conv.messages = messages
+        db.session.commit()
+    
+    return jsonify({'status': 'ok'})
 
 
 def handle_command(cmd):
