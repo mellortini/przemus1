@@ -435,6 +435,92 @@ def handle_command(cmd):
     return f"Nieznana komenda: {cmd}"
 
 
+# === API: MEMORY ===
+
+@app.route('/api/memory', methods=['GET'])
+@login_required
+def api_get_memory():
+    """Pobiera wszystkie wpisy pamięci użytkownika."""
+    entries = get_user_memory_entries(current_user)
+    # Zwróć jako lista stringów z tagami
+    result = []
+    for e in entries:
+        result.append(f"[{e['tag']}] {e['text']}")
+    return jsonify({'entries': result})
+
+
+@app.route('/api/memory', methods=['PUT'])
+@login_required
+def api_update_memory():
+    """Aktualizuje wpis pamięci po indeksie."""
+    data = request.json
+    idx = data.get('index')
+    new_content = data.get('content', '')
+    
+    entries = get_user_memory_entries(current_user)
+    if idx < 0 or idx >= len(entries):
+        return jsonify({'error': 'Invalid index'}), 400
+    
+    # Odbuduj pamięć z aktualizacją
+    lines = current_user.memory.split('\n')
+    new_lines = []
+    entry_idx = 0
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('[') and any(stripped.startswith(f'[{t}]') for t in ['FACT', 'PREF', 'TODO', 'DECISION']):
+            if entry_idx == idx:
+                new_lines.append(new_content)
+            else:
+                new_lines.append(line)
+            entry_idx += 1
+        else:
+            new_lines.append(line)
+    
+    current_user.memory = '\n'.join(new_lines)
+    db.session.commit()
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/memory', methods=['DELETE'])
+@login_required
+def api_delete_memory():
+    """Usuwa wpis pamięci po indeksie."""
+    data = request.json
+    idx = data.get('index')
+    
+    entries = get_user_memory_entries(current_user)
+    if idx < 0 or idx >= len(entries):
+        return jsonify({'error': 'Invalid index'}), 400
+    
+    # Odbuduj pamięć bez usuniętego wpisu
+    lines = current_user.memory.split('\n')
+    new_lines = []
+    entry_idx = 0
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('[') and any(stripped.startswith(f'[{t}]') for t in ['FACT', 'PREF', 'TODO', 'DECISION']):
+            if entry_idx != idx:
+                new_lines.append(line)
+            entry_idx += 1
+        else:
+            new_lines.append(line)
+    
+    current_user.memory = '\n'.join(new_lines)
+    db.session.commit()
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/memory/clear', methods=['POST'])
+@login_required
+def api_clear_memory():
+    """Czyści całą pamięć użytkownika."""
+    current_user.memory = "# Log pamięci Przemusia\n\n"
+    db.session.commit()
+    return jsonify({'status': 'ok'})
+
+
 # === API: CONVERSATIONS ===
 
 @app.route('/api/conversations', methods=['GET'])

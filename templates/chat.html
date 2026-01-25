@@ -598,6 +598,73 @@
         .status-message.success { background: rgba(34, 197, 94, 0.1); color: var(--success); display: block; }
         .status-message.error { background: rgba(239, 68, 68, 0.1); color: var(--error); display: block; }
 
+        /* Memory entries */
+        .memory-entry {
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .memory-entry .tag {
+            background: var(--accent);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .memory-entry .tag.fact { background: #3b82f6; }
+        .memory-entry .tag.pref { background: #8b5cf6; }
+        .memory-entry .tag.todo { background: #f59e0b; }
+        .memory-entry .tag.decision { background: #10b981; }
+        .memory-entry .content {
+            flex: 1;
+            color: var(--text-primary);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .memory-entry .actions {
+            display: flex;
+            gap: 5px;
+        }
+        .memory-entry .action-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .memory-entry .action-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .memory-entry .action-btn.delete:hover {
+            border-color: var(--error);
+            color: var(--error);
+        }
+        .memory-empty {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+        .memory-edit-input {
+            flex: 1;
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
         /* Scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -641,32 +708,11 @@
             </div>
         </div>
         
-        <!-- Komendy -->
-        <div class="commands-section">
-            <div class="section-title">Sesja</div>
-            <button class="command-btn" onclick="sendCommand('/plan')">
-                <span class="icon">📋</span>
-                <span>/plan</span>
-            </button>
-            <button class="command-btn" onclick="sendCommand('/update')">
-                <span class="icon">💾</span>
-                <span>/update</span>
-            </button>
-            <button class="command-btn" onclick="sendCommand('/end')">
-                <span class="icon">🏁</span>
-                <span>/end</span>
-            </button>
-            
-            <div class="section-title">Pamięć</div>
-            <button class="command-btn" onclick="sendCommand('/memory')">
-                <span class="icon">🧠</span>
-                <span>/memory - co pamiętam</span>
-            </button>
-            <button class="command-btn" onclick="openForgetDialog()">
-                <span class="icon">🗑️</span>
-                <span>/forget - zapomnij</span>
-            </button>
-        </div>
+        <!-- Pamięć -->
+        <button class="sidebar-btn" onclick="openMemoryPanel()" style="margin-top: auto;">
+            <span>🧠</span>
+            <span>Pamięć</span>
+        </button>
         
         <div class="provider-badge" id="provider-badge">
             <span class="dot"></span>
@@ -705,8 +751,33 @@
         </div>
     </main>
 
-    <!-- Forget Dialog -->
-    <div class="modal-overlay" id="forget-modal">
+    <!-- Memory Panel -->
+    <div class="modal-overlay" id="memory-modal">
+        <div class="modal" style="max-width: 600px; max-height: 80vh;">
+            <div class="modal-header">
+                <h2 class="modal-title">🧠 Pamięć Przemusia</h2>
+                <button class="modal-close" onclick="closeMemoryPanel()">×</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; max-height: 60vh;">
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                    Tutaj widzisz wszystko co o Tobie pamiętam. Możesz edytować lub usunąć dowolny wpis.
+                </p>
+                <div id="memory-entries">
+                    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                        Ładowanie...
+                    </div>
+                </div>
+                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border);">
+                    <button class="save-btn" onclick="clearAllMemory()" style="background: var(--error);">
+                        🗑️ Wyczyść całą pamięć
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Forget Dialog (legacy) -->
+    <div class="modal-overlay" id="forget-modal" style="display: none;">
         <div class="modal" style="max-width: 400px;">
             <div class="modal-header">
                 <h2 class="modal-title">🗑️ Zapomnij</h2>
@@ -1057,7 +1128,147 @@
             if (e.target.id === 'settings-modal') closeSettings();
         });
         
-        // Forget dialog
+        // === MEMORY PANEL ===
+        
+        let memoryEntries = [];
+        
+        async function openMemoryPanel() {
+            document.getElementById('memory-modal').classList.add('active');
+            await loadMemoryEntries();
+        }
+        
+        function closeMemoryPanel() {
+            document.getElementById('memory-modal').classList.remove('active');
+        }
+        
+        document.getElementById('memory-modal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'memory-modal') closeMemoryPanel();
+        });
+        
+        async function loadMemoryEntries() {
+            const container = document.getElementById('memory-entries');
+            container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Ładowanie...</div>';
+            
+            try {
+                const response = await fetch('/api/memory');
+                const data = await response.json();
+                memoryEntries = data.entries || [];
+                renderMemoryEntries();
+            } catch (error) {
+                container.innerHTML = '<div class="memory-empty">Błąd ładowania pamięci</div>';
+            }
+        }
+        
+        function renderMemoryEntries() {
+            const container = document.getElementById('memory-entries');
+            
+            if (memoryEntries.length === 0) {
+                container.innerHTML = '<div class="memory-empty">🧠 Nie mam jeszcze żadnych wspomnień o Tobie.<br><br>Porozmawiaj ze mną, a zacznę zapamiętywać!</div>';
+                return;
+            }
+            
+            container.innerHTML = memoryEntries.map((entry, idx) => {
+                const tagMatch = entry.match(/^\[([A-Z]+)\]/);
+                const tag = tagMatch ? tagMatch[1].toLowerCase() : 'fact';
+                const content = entry.replace(/^\[[A-Z]+\]\s*/, '');
+                
+                return `
+                    <div class="memory-entry" data-idx="${idx}">
+                        <span class="tag ${tag}">${tag.toUpperCase()}</span>
+                        <span class="content" id="content-${idx}">${escapeHtml(content)}</span>
+                        <div class="actions">
+                            <button class="action-btn" onclick="editMemoryEntry(${idx})" title="Edytuj">✏️</button>
+                            <button class="action-btn delete" onclick="deleteMemoryEntry(${idx})" title="Usuń">🗑️</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        async function editMemoryEntry(idx) {
+            const entry = memoryEntries[idx];
+            const tagMatch = entry.match(/^\[([A-Z]+)\]/);
+            const tag = tagMatch ? tagMatch[0] : '[FACT]';
+            const content = entry.replace(/^\[[A-Z]+\]\s*/, '');
+            
+            const contentEl = document.getElementById(`content-${idx}`);
+            const originalHtml = contentEl.innerHTML;
+            
+            contentEl.innerHTML = `
+                <input type="text" class="memory-edit-input" id="edit-input-${idx}" value="${escapeHtml(content)}">
+                <button class="action-btn" onclick="saveMemoryEntry(${idx}, '${tag}')" style="margin-left: 5px;">💾</button>
+                <button class="action-btn" onclick="cancelEditMemory(${idx}, '${originalHtml}')">❌</button>
+            `;
+            document.getElementById(`edit-input-${idx}`).focus();
+        }
+        
+        function cancelEditMemory(idx, originalHtml) {
+            document.getElementById(`content-${idx}`).innerHTML = originalHtml;
+        }
+        
+        async function saveMemoryEntry(idx, tag) {
+            const input = document.getElementById(`edit-input-${idx}`);
+            const newContent = input.value.trim();
+            
+            if (!newContent) {
+                alert('Treść nie może być pusta');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/memory', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        index: idx, 
+                        content: `${tag} ${newContent}`
+                    })
+                });
+                
+                if (response.ok) {
+                    await loadMemoryEntries();
+                } else {
+                    alert('Błąd zapisu');
+                }
+            } catch (error) {
+                alert('Błąd połączenia');
+            }
+        }
+        
+        async function deleteMemoryEntry(idx) {
+            if (!confirm('Na pewno usunąć ten wpis?')) return;
+            
+            try {
+                const response = await fetch('/api/memory', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ index: idx })
+                });
+                
+                if (response.ok) {
+                    await loadMemoryEntries();
+                } else {
+                    alert('Błąd usuwania');
+                }
+            } catch (error) {
+                alert('Błąd połączenia');
+            }
+        }
+        
+        async function clearAllMemory() {
+            if (!confirm('Na pewno chcesz wyczyścić CAŁĄ pamięć? Tej operacji nie można cofnąć!')) return;
+            
+            try {
+                const response = await fetch('/api/memory/clear', { method: 'POST' });
+                if (response.ok) {
+                    await loadMemoryEntries();
+                }
+            } catch (error) {
+                alert('Błąd połączenia');
+            }
+        }
+        
+        // Forget dialog (legacy - hidden)
         function openForgetDialog() { 
             document.getElementById('forget-modal').classList.add('active');
             document.getElementById('forget-keyword').focus();
@@ -1067,7 +1278,7 @@
             document.getElementById('forget-keyword').value = '';
         }
         
-        document.getElementById('forget-modal').addEventListener('click', (e) => {
+        document.getElementById('forget-modal')?.addEventListener('click', (e) => {
             if (e.target.id === 'forget-modal') closeForgetDialog();
         });
         
@@ -1087,7 +1298,7 @@
             sendCommand('/forget-all');
         }
         
-        // Enter w polu forget
+        // Enter w polu forget (legacy)
         document.getElementById('forget-keyword')?.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') doForget();
         });
