@@ -665,6 +665,81 @@
             font-size: 14px;
         }
 
+        /* Feedback entries */
+        .feedback-entry {
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 12px;
+            border-left: 3px solid var(--accent);
+        }
+        .feedback-entry.new {
+            border-left-color: var(--accent);
+            background: rgba(99, 102, 241, 0.1);
+        }
+        .feedback-entry.read {
+            border-left-color: var(--text-muted);
+            opacity: 0.7;
+        }
+        .feedback-entry.resolved {
+            border-left-color: var(--success);
+        }
+        .feedback-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .feedback-meta {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .feedback-type-badge {
+            padding: 3px 8px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .feedback-type-badge.suggestion { background: #3b82f6; color: white; }
+        .feedback-type-badge.idea { background: #8b5cf6; color: white; }
+        .feedback-type-badge.problem { background: #ef4444; color: white; }
+        .feedback-type-badge.other { background: var(--text-muted); color: white; }
+        .feedback-content {
+            color: var(--text-primary);
+            line-height: 1.6;
+            white-space: pre-wrap;
+            margin-bottom: 10px;
+        }
+        .feedback-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .feedback-actions button {
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .feedback-actions button:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .feedback-actions button.mark-resolved {
+            background: var(--success);
+            color: white;
+            border-color: var(--success);
+        }
+        .feedback-actions button.mark-resolved:hover {
+            background: #16a34a;
+        }
+
         /* Scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -709,9 +784,15 @@
         </div>
         
         <!-- Pamięć -->
-        <button class="sidebar-btn" onclick="openMemoryPanel()" style="margin-top: auto;">
+        <button class="sidebar-btn" onclick="openMemoryPanel()">
             <span>🧠</span>
             <span>Pamięć</span>
+        </button>
+        
+        <!-- Ulepszaj Przemusia -->
+        <button class="sidebar-btn" onclick="openFeedbackPanel()">
+            <span>💡</span>
+            <span>Ulepszaj Przemusia</span>
         </button>
         
         <div class="provider-badge" id="provider-badge">
@@ -750,6 +831,59 @@
             </div>
         </div>
     </main>
+
+    <!-- Feedback Panel -->
+    <div class="modal-overlay" id="feedback-modal">
+        <div class="modal" style="max-width: 700px; max-height: 80vh;">
+            <div class="modal-header">
+                <h2 class="modal-title">💡 Ulepszaj Przemusia</h2>
+                <button class="modal-close" onclick="closeFeedbackPanel()">×</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; max-height: 60vh;">
+                <!-- Admin view -->
+                <div id="feedback-admin-view" style="display: none;">
+                    <h3 style="margin-bottom: 15px; color: var(--accent);">📬 Feedback od użytkowników</h3>
+                    <div id="feedback-list">
+                        <div style="text-align: center; padding: 40px; color: var(--text-muted);">Ładowanie...</div>
+                    </div>
+                </div>
+                
+                <!-- User form -->
+                <div id="feedback-user-view">
+                    <p style="color: var(--text-secondary); margin-bottom: 20px; line-height: 1.6;">
+                        Masz pomysł jak ulepszyć Przemusia? Znalazłeś problem? Napisz nam!
+                    </p>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Typ wiadomości</label>
+                        <select class="form-select" id="feedback-type">
+                            <option value="suggestion">💡 Sugestia</option>
+                            <option value="idea">🚀 Pomysł</option>
+                            <option value="problem">🐛 Problem/Bug</option>
+                            <option value="other">📝 Inne</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Twoja wiadomość</label>
+                        <textarea 
+                            class="form-input" 
+                            id="feedback-content" 
+                            rows="6" 
+                            placeholder="Opisz co masz na myśli..."
+                            style="resize: vertical;"
+                        ></textarea>
+                    </div>
+                    
+                    <button class="save-btn" onclick="submitFeedback()">Wyślij feedback</button>
+                    
+                    <p style="color: var(--text-muted); font-size: 12px; margin-top: 15px; text-align: center;">
+                        Dziękujemy za pomoc w ulepszaniu Przemusia! 🙏
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Memory Panel -->
     <div class="modal-overlay" id="memory-modal">
@@ -1265,6 +1399,144 @@
                 }
             } catch (error) {
                 alert('Błąd połączenia');
+            }
+        }
+        
+        // === FEEDBACK PANEL ===
+        
+        let isAdmin = false;
+        
+        async function openFeedbackPanel() {
+            document.getElementById('feedback-modal').classList.add('active');
+            
+            // Sprawdź czy user jest adminem
+            try {
+                const response = await fetch('/api/user');
+                const data = await response.json();
+                isAdmin = data.is_admin === true;
+                
+                if (isAdmin) {
+                    document.getElementById('feedback-admin-view').style.display = 'block';
+                    document.getElementById('feedback-user-view').style.display = 'none';
+                    await loadFeedbackList();
+                } else {
+                    document.getElementById('feedback-admin-view').style.display = 'none';
+                    document.getElementById('feedback-user-view').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error checking admin status:', error);
+            }
+        }
+        
+        function closeFeedbackPanel() {
+            document.getElementById('feedback-modal').classList.remove('active');
+            document.getElementById('feedback-content').value = '';
+        }
+        
+        document.getElementById('feedback-modal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'feedback-modal') closeFeedbackPanel();
+        });
+        
+        async function submitFeedback() {
+            const type = document.getElementById('feedback-type').value;
+            const content = document.getElementById('feedback-content').value.trim();
+            
+            if (!content) {
+                alert('Wpisz swoją wiadomość');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type, content })
+                });
+                
+                if (response.ok) {
+                    alert('Dziękujemy za feedback! 🙏');
+                    closeFeedbackPanel();
+                } else {
+                    alert('Błąd wysyłania');
+                }
+            } catch (error) {
+                alert('Błąd połączenia');
+            }
+        }
+        
+        async function loadFeedbackList() {
+            const container = document.getElementById('feedback-list');
+            container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Ładowanie...</div>';
+            
+            try {
+                const response = await fetch('/api/feedback/admin');
+                const data = await response.json();
+                renderFeedbackList(data.feedbacks || []);
+            } catch (error) {
+                container.innerHTML = '<div class="memory-empty">Błąd ładowania feedbacku</div>';
+            }
+        }
+        
+        function renderFeedbackList(feedbacks) {
+            const container = document.getElementById('feedback-list');
+            
+            if (feedbacks.length === 0) {
+                container.innerHTML = '<div class="memory-empty">📭 Brak feedbacku od użytkowników</div>';
+                return;
+            }
+            
+            const typeLabels = {
+                'suggestion': '💡 Sugestia',
+                'idea': '🚀 Pomysł',
+                'problem': '🐛 Problem',
+                'other': '📝 Inne'
+            };
+            
+            container.innerHTML = feedbacks.map(fb => {
+                const typeLabel = typeLabels[fb.type] || fb.type;
+                const date = new Date(fb.created_at).toLocaleString('pl-PL');
+                
+                return `
+                    <div class="feedback-entry ${fb.status}">
+                        <div class="feedback-header">
+                            <div class="feedback-meta">
+                                <span class="feedback-type-badge ${fb.type}">${typeLabel}</span>
+                                <span>${fb.user_name || fb.user_email || 'Anonimowy'}</span>
+                                <span>•</span>
+                                <span>${date}</span>
+                            </div>
+                            ${fb.status === 'new' ? '<span style="color: var(--accent); font-size: 11px; font-weight: 600;">NOWY</span>' : ''}
+                        </div>
+                        <div class="feedback-content">${escapeHtml(fb.content)}</div>
+                        <div class="feedback-actions">
+                            ${fb.status === 'new' ? `
+                                <button onclick="markFeedbackRead(${fb.id})">✓ Oznacz jako przeczytane</button>
+                                <button class="mark-resolved" onclick="markFeedbackResolved(${fb.id})">✓ Rozwiązane</button>
+                            ` : ''}
+                            ${fb.status === 'read' ? `
+                                <button class="mark-resolved" onclick="markFeedbackResolved(${fb.id})">✓ Rozwiązane</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        async function markFeedbackRead(id) {
+            try {
+                await fetch(`/api/feedback/${id}/read`, { method: 'POST' });
+                await loadFeedbackList();
+            } catch (error) {
+                alert('Błąd');
+            }
+        }
+        
+        async function markFeedbackResolved(id) {
+            try {
+                await fetch(`/api/feedback/${id}/resolved`, { method: 'POST' });
+                await loadFeedbackList();
+            } catch (error) {
+                alert('Błąd');
             }
         }
         

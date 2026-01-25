@@ -78,6 +78,39 @@ class Conversation(db.Model):
         return f'<Conversation {self.id}>'
 
 
+class Feedback(db.Model):
+    """Feedback model - stores user suggestions/ideas/problems."""
+    __tablename__ = 'feedback'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Nullable - może być anonimowy
+    user_email = db.Column(db.String(200))  # Email usera (może być inny niż w User)
+    type = db.Column(db.String(20), nullable=False)  # 'suggestion', 'idea', 'problem', 'other'
+    content = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='new')  # 'new', 'read', 'resolved'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    read_at = db.Column(db.DateTime, nullable=True)
+    
+    # Relationship
+    user = db.relationship('User', backref='feedbacks', lazy=True)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'user_email': self.user_email,
+            'user_name': self.user.name if self.user else None,
+            'type': self.type,
+            'content': self.content,
+            'status': self.status,
+            'created_at': self.created_at.isoformat(),
+            'read_at': self.read_at.isoformat() if self.read_at else None
+        }
+    
+    def __repr__(self):
+        return f'<Feedback {self.id} by {self.user_email}>'
+
+
 def init_db(app):
     """Initialize database with app."""
     db.init_app(app)

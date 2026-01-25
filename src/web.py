@@ -5,9 +5,10 @@ Przemuś - Web Application with Google OAuth
 
 import os
 import uuid
+from datetime import datetime
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_login import login_required, current_user
-from database import db, init_db, User, Conversation
+from database import db, init_db, User, Conversation, Feedback
 from auth import auth_bp, init_auth, oauth
 from llm import ask_llm, test_connection
 from config import PROVIDERS, load_settings
@@ -660,14 +661,90 @@ def test_api_connection():
 def get_user():
     """Pobiera dane zalogowanego użytkownika."""
     if current_user.is_authenticated:
+        # Sprawdź czy user jest adminem
+        admin_email = os.getenv('ADMIN_EMAIL', 'mateuszmalekto@gmail.com')
+        is_admin = current_user.email.lower() == admin_email.lower()
+        
         return jsonify({
             'logged_in': True,
             'id': current_user.id,
             'name': current_user.name,
             'email': current_user.email,
-            'avatar': current_user.avatar_url
+            'avatar': current_user.avatar_url,
+            'is_admin': is_admin
         })
     return jsonify({'logged_in': False})
+
+
+# === API: FEEDBACK ===
+
+@app.route('/api/feedback', methods=['POST'])
+@login_required
+def submit_feedback():
+    """Zapisuje feedback od użytkownika."""
+    data = request.json
+    feedback_type = data.get('type', 'other')
+    content = data.get('content', '').strip()
+    
+    if not content:
+        return jsonify({'error': 'Pusta wiadomość'}), 400
+    
+    feedback = Feedback(
+        user_id=current_user.id,
+        user_email=current_user.email,
+        type=feedback_type,
+        content=content,
+        status='new'
+    )
+    db.session.add(feedback)
+    db.session.commit()
+    
+    return jsonify({'status': 'ok', 'message': 'Feedback zapisany'})
+
+
+@app.route('/api/feedback/admin', methods=['GET'])
+@login_required
+def get_feedback_admin():
+    """Pobiera wszystkie feedbacki (tylko dla admina)."""
+    admin_email = os.getenv('ADMIN_EMAIL', 'mateuszmalekto@gmail.com')
+    if current_user.email.lower() != admin_email.lower():
+        return jsonify({'error': 'Brak uprawnień'}), 403
+    
+    feedbacks = Feedback.query.order_by(Feedback.created_at.desc()).all()
+    return jsonify({
+        'feedbacks': [fb.to_dict() for fb in feedbacks]
+    })
+
+
+@app.route('/api/feedback/<int:feedback_id>/read', methods=['POST'])
+@login_required
+def mark_feedback_read(feedback_id):
+    """Oznacza feedback jako przeczytany (tylko dla admina)."""
+    admin_email = os.getenv('ADMIN_EMAIL', 'mateuszmalekto@gmail.com')
+    if current_user.email.lower() != admin_email.lower():
+        return jsonify({'error': 'Brak uprawnień'}), 403
+    
+    feedback = Feedback.query.get_or_404(feedback_id)
+    feedback.status = 'read'
+    feedback.read_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/feedback/<int:feedback_id>/resolved', methods=['POST'])
+@login_required
+def mark_feedback_resolved(feedback_id):
+    """Oznacza feedback jako rozwiązany (tylko dla admina)."""
+    admin_email = os.getenv('ADMIN_EMAIL', 'mateuszmalekto@gmail.com')
+    if current_user.email.lower() != admin_email.lower():
+        return jsonify({'error': 'Brak uprawnień'}), 403
+    
+    feedback = Feedback.query.get_or_404(feedback_id)
+    feedback.status = 'resolved'
+    db.session.commit()
+    
+    return jsonify({'status': 'ok'})
 
 
 # === RUN ===
