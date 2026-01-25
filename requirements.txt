@@ -4,6 +4,7 @@ flask
 flask-login
 flask-sqlalchemy
 authlib
+requests
 groq
 anthropic
 gunicorn
