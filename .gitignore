@@ -1,0 +1,30 @@
+# Environment
+.env
+*.env
+settings.json
+
+# Database
+*.db
+data/przemus.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
