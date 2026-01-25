@@ -305,13 +305,8 @@ def chat():
         db.session.add(conv)
         db.session.commit()
     
-    # Dodaj wiadomość użytkownika (zaszyfrowaną)
+    # Pobierz historię rozmowy
     messages = conv.messages
-    encrypted_msg = encrypt_for_user(user_message, current_user.id)
-    messages.append({
-        "role": "user", 
-        "content": encrypted_msg
-    })
     
     try:
         # Buduj kontekst
@@ -326,10 +321,13 @@ def chat():
         if current_user.profile:
             context.append({"role": "system", "content": f"Profil użytkownika:\n{current_user.profile}"})
         
-        # Dodaj historię rozmowy (odszyfrowaną dla LLM)
-        for msg in messages[-10:]:
+        # Dodaj historię rozmowy (odszyfrowaną dla LLM) - BEZ aktualnej wiadomości
+        for msg in messages[-9:]:  # Ostatnie 9 (zostawiamy miejsce na aktualną)
             decrypted_content = decrypt_for_user(msg.get('content', ''), current_user.id)
             context.append({"role": msg['role'], "content": decrypted_content})
+        
+        # Dodaj AKTUALNĄ wiadomość użytkownika (plaintext - jeszcze nie zaszyfrowana)
+        context.append({"role": "user", "content": user_message})
         
         # Pobierz ustawienia użytkownika
         settings = current_user.settings
@@ -347,12 +345,12 @@ def chat():
         response = ask_llm(context, provider=provider, model=model, 
                           api_key=user_api_key)
         
-        # Zapisz zaszyfrowaną odpowiedź
+        # Teraz zapisz ZASZYFROWANE wiadomości (user + assistant)
+        encrypted_user_msg = encrypt_for_user(user_message, current_user.id)
         encrypted_response = encrypt_for_user(response, current_user.id)
-        messages.append({
-            "role": "assistant", 
-            "content": encrypted_response
-        })
+        
+        messages.append({"role": "user", "content": encrypted_user_msg})
+        messages.append({"role": "assistant", "content": encrypted_response})
         conv.messages = messages
         db.session.commit()
         
