@@ -54,12 +54,22 @@ def decrypt_for_user(text: str, user_id: int) -> str:
     try:
         key = get_user_encryption_key(user_id)
         f = Fernet(key)
-        encrypted_data = text[2:].encode()  # Usuń prefix 🔒
+        # Spróbuj najpierw z 1 znakiem (poprawne)
+        encrypted_data = text[1:].encode()
         decrypted = f.decrypt(encrypted_data)
         return decrypted.decode()
-    except Exception as e:
-        print(f"Decryption error: {e}")
-        return "[nie można odszyfrować]"
+    except Exception:
+        # Fallback: może to stary format z błędnym usunięciem 2 znaków?
+        try:
+            key = get_user_encryption_key(user_id)
+            f = Fernet(key)
+            # Spróbuj z 2 znakami (stary błędny format)
+            encrypted_data = text[2:].encode()
+            decrypted = f.decrypt(encrypted_data)
+            return decrypted.decode()
+        except Exception as e:
+            print(f"Decryption error: {e}")
+            return "[nie można odszyfrować]"
 
 # Ścieżki
 BASE_DIR = Path(__file__).resolve().parent.parent
