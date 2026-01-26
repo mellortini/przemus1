@@ -604,6 +604,32 @@ def get_conversation(conv_id):
     return jsonify({'error': 'Nie znaleziono'}), 404
 
 
+@app.route('/api/conversations/<conv_id>/select', methods=['POST'])
+@login_required
+def select_conversation(conv_id):
+    """Wybór rozmowy (używane przez frontend przy kliknięciu)."""
+    conv = Conversation.query.filter_by(id=conv_id, user_id=current_user.id).first()
+    if conv:
+        # Odszyfruj wiadomości dla usera
+        decrypted_messages = []
+        for msg in conv.messages:
+            decrypted_messages.append({
+                'role': msg['role'],
+                'content': decrypt_for_user(msg.get('content', ''), current_user.id)
+            })
+        
+        return jsonify({
+            'conversation': {
+                'id': conv.id,
+                'title': decrypt_for_user(conv.title, current_user.id),  # Odszyfruj tytuł
+                'messages': decrypted_messages,
+                'created_at': conv.created_at.isoformat(),
+                'updated_at': conv.updated_at.isoformat()
+            }
+        })
+    return jsonify({'error': 'Nie znaleziono'}), 404
+
+
 @app.route('/api/conversations/<conv_id>', methods=['DELETE'])
 @login_required
 def delete_conversation(conv_id):
