@@ -115,4 +115,6 @@ def init_db(app):
     """Initialize database with app."""
     db.init_app(app)
     with app.app_context():
+        # Import memory_models żeby db.create_all() wiedział o nowych tabelach
+        import memory_models  # noqa: F401
         db.create_all()

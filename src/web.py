@@ -103,6 +103,13 @@ init_db(app)
 init_auth(app)
 app.register_blueprint(auth_bp, url_prefix='/auth')
 
+# Migracja pamięci (jednorazowa, przy starcie)
+try:
+    from migrate_memory import run_migration
+    run_migration(app)
+except Exception as e:
+    print(f"Migration note: {e}")
+
 
 # === SYSTEM PROMPT ===
 
@@ -112,158 +119,12 @@ Odpowiadasz po polsku, chyba że użytkownik pisze w innym języku.
 Nie używasz emoji chyba że użytkownik ich używa."""
 
 
-# === MEMORY FUNCTIONS ===
+# === MEMORY IMPORTS ===
 
-def get_user_memory_entries(user):
-    """Parsuje pamięć użytkownika i zwraca wpisy."""
-    if not user.memory:
-        return []
-    
-    entries = []
-    current_date = None
-    
-    for line in user.memory.split('\n'):
-        line = line.strip()
-        if line.startswith('### '):
-            current_date = line[4:]
-        elif line.startswith('['):
-            bracket_end = line.find(']')
-            if bracket_end > 0:
-                tag = line[1:bracket_end]
-                text = line[bracket_end+1:].strip()
-                entries.append({
-                    'id': len(entries),
-                    'date': current_date,
-                    'tag': tag,
-                    'text': text
-                })
-    return entries
+import memory_manager as mm
+from context_packer import pack_context
 
-
-def delete_memory_by_keyword(user, keyword):
-    """Usuwa wpisy z pamięci zawierające słowo kluczowe."""
-    if not user.memory:
-        return 0
-    
-    lines = user.memory.split('\n')
-    new_lines = []
-    deleted = 0
-    
-    for line in lines:
-        if keyword.lower() in line.lower() and line.strip().startswith('['):
-            deleted += 1
-        else:
-            new_lines.append(line)
-    
-    if deleted > 0:
-        user.memory = '\n'.join(new_lines)
-        db.session.commit()
-    
-    return deleted
-
-
-def append_to_memory(user, entry):
-    """Dodaje wpis do pamięci użytkownika (bez duplikatów)."""
-    from datetime import datetime
-    today = datetime.now().strftime('%Y-%m-%d')
-    
-    if not entry or not entry.strip():
-        return
-    
-    # Wyciągnij istniejące fakty z pamięci (bez dat)
-    existing_facts = set()
-    for line in user.memory.split('\n'):
-        line = line.strip()
-        if line.startswith('['):
-            # Normalizuj: usuń tagi i sprowadź do małych liter
-            clean = line.lower()
-            for tag in ['[fact]', '[pref]', '[todo]', '[decision]']:
-                clean = clean.replace(tag, '')
-            existing_facts.add(clean.strip())
-    
-    # Filtruj nowe wpisy - dodaj tylko te których jeszcze nie ma
-    new_entries = []
-    for line in entry.split('\n'):
-        line = line.strip()
-        if not line or not line.startswith('['):
-            continue
-        
-        clean = line.lower()
-        for tag in ['[fact]', '[pref]', '[todo]', '[decision]']:
-            clean = clean.replace(tag, '')
-        clean = clean.strip()
-        
-        # Sprawdź czy podobny fakt już istnieje
-        is_duplicate = False
-        for existing in existing_facts:
-            # Prosta heurystyka: jeśli >70% słów się pokrywa, to duplikat
-            new_words = set(clean.split())
-            exist_words = set(existing.split())
-            if len(new_words) > 0 and len(exist_words) > 0:
-                overlap = len(new_words & exist_words) / max(len(new_words), len(exist_words))
-                if overlap > 0.7:
-                    is_duplicate = True
-                    break
-        
-        if not is_duplicate:
-            new_entries.append(line)
-            existing_facts.add(clean)
-    
-    # Dodaj tylko nowe, unikalne wpisy
-    if new_entries:
-        if f'### {today}' not in user.memory:
-            user.memory += f'\n### {today}\n'
-        
-        user.memory += '\n'.join(new_entries) + '\n'
-        db.session.commit()
-
-
-def extract_memory_from_conversation(user_msg, assistant_msg, existing_memory='', provider='groq', api_key=None):
-    """Wyciąga istotne informacje z rozmowy do pamięci (bez duplikatów)."""
-    
-    # Pokaż LLM co już wie, żeby nie powtarzał
-    memory_context = ""
-    if existing_memory and existing_memory.strip():
-        # Wyciągnij tylko wpisy [TAG], bez dat
-        existing_facts = []
-        for line in existing_memory.split('\n'):
-            line = line.strip()
-            if line.startswith('['):
-                existing_facts.append(line)
-        if existing_facts:
-            memory_context = f"""
-CO JUŻ WIEM O UŻYTKOWNIKU (NIE POWTARZAJ TEGO):
-{chr(10).join(existing_facts[-20:])}
-
-"""
-    
-    prompt = f"""{memory_context}Przeanalizuj tę wymianę i wyciągnij TYLKO NOWE, istotne informacje o użytkowniku.
-
-WAŻNE:
-- NIE powtarzaj informacji które już znam (pokazane wyżej)
-- Jeśli informacja jest semantycznie taka sama (np. "ma na imię X" vs "nazywa się X"), NIE dodawaj
-- Zwróć TYLKO naprawdę NOWE fakty
-- Jeśli nie ma nic nowego, zwróć pustą odpowiedź
-
-Format: [TAG] informacja
-Tagi: [FACT], [PREF], [TODO], [DECISION]
-
-Użytkownik: {user_msg}
-Asystent: {assistant_msg}
-
-Nowe informacje (lub pusta odpowiedź):"""
-
-    try:
-        if not api_key:
-            api_key = os.getenv('LLM_API_KEY')
-        
-        result = ask_llm([
-            {"role": "system", "content": "Jesteś modułem ekstrakcji pamięci. Wyciągaj TYLKO nowe informacje, których jeszcze nie znasz. Bądź BARDZO selektywny."},
-            {"role": "user", "content": prompt}
-        ], provider=provider, api_key=api_key)
-        return result.strip()
-    except:
-        return ""
+# Stare funkcje pamięci usunięte — zastąpione przez memory_manager.py
 
 
 # === ROUTES ===
@@ -324,43 +185,46 @@ def chat():
     messages = conv.messages
     
     try:
-        # Buduj kontekst
-        context = [{"role": "system", "content": SYSTEM_PROMPT}]
-        
-        # Dodaj pamięć użytkownika
-        if current_user.memory:
-            memory_summary = current_user.memory[-2000:]  # Ostatnie 2000 znaków
-            context.append({"role": "system", "content": f"Pamięć o użytkowniku:\n{memory_summary}"})
-        
-        # Dodaj profil
-        if current_user.profile:
-            context.append({"role": "system", "content": f"Profil użytkownika:\n{current_user.profile}"})
-        
-        # Dodaj historię rozmowy (odszyfrowaną dla LLM) - BEZ aktualnej wiadomości
-        for msg in messages[-9:]:  # Ostatnie 9 (zostawiamy miejsce na aktualną)
-            decrypted_content = decrypt_for_user(msg.get('content', ''), current_user.id)
-            context.append({"role": msg['role'], "content": decrypted_content})
-        
-        # Dodaj AKTUALNĄ wiadomość użytkownika (plaintext - jeszcze nie zaszyfrowana)
-        context.append({"role": "user", "content": user_message})
-        
         # Pobierz ustawienia użytkownika
         settings = current_user.settings
         provider = settings.get('provider', 'groq')
         model = settings.get('model', 'llama-3.3-70b-versatile')
         
-        # Pobierz klucz API - najpierw z ustawień użytkownika, potem z env
+        # Pobierz klucz API
         user_api_key = settings.get('api_keys', {}).get(provider)
         if not user_api_key:
-            # Fallback do zmiennych środowiskowych (klucze admina)
-            # Używamy LLM_API_KEY jako uniwersalny klucz
             user_api_key = os.getenv('LLM_API_KEY')
+        
+        # === NOWY SYSTEM PAMIĘCI: Context Packer ===
+        # Pobierz preferencje z LTM
+        preferences = mm.get_preferences(current_user.id)
+        
+        # Pobierz working state (STM)
+        ws = mm.get_working_state(conv.id, current_user.id)
+        ws_str = ws.to_prompt_string() if ws.task else ""
+        
+        # Pobierz relevantne fakty
+        relevant_facts = mm.get_relevant_facts(current_user.id, user_message)
+        
+        # Zbuduj minimalny kontekst z budżetem tokenów
+        context = pack_context(
+            system_prompt=SYSTEM_PROMPT,
+            preferences=preferences,
+            working_state_str=ws_str,
+            relevant_facts=relevant_facts,
+            conversation_messages=messages,
+            user_message=user_message,
+            decrypt_fn=decrypt_for_user,
+            user_id=current_user.id,
+            budget=3000,
+            last_turns=3
+        )
         
         # Wywołaj LLM
         response = ask_llm(context, provider=provider, model=model, 
                           api_key=user_api_key)
         
-        # Teraz zapisz ZASZYFROWANE wiadomości (user + assistant)
+        # Zapisz ZASZYFROWANE wiadomości
         encrypted_user_msg = encrypt_for_user(user_message, current_user.id)
         encrypted_response = encrypt_for_user(response, current_user.id)
         
@@ -369,17 +233,19 @@ def chat():
         conv.messages = messages
         db.session.commit()
         
-        # Wyciągnij pamięć w tle (przekaż istniejącą pamięć żeby nie było duplikatów)
+        # === NOWY SYSTEM PAMIĘCI: Process Turn ===
         try:
-            memory_entry = extract_memory_from_conversation(
-                user_message, response, 
-                existing_memory=current_user.memory or '',
-                provider=provider, api_key=user_api_key
+            result = mm.process_turn(
+                user_id=current_user.id,
+                conversation_id=conv.id,
+                user_msg=user_message,
+                assistant_msg=response,
+                provider=provider,
+                api_key=user_api_key
             )
-            if memory_entry and memory_entry.strip():
-                append_to_memory(current_user, memory_entry)
-        except:
-            pass
+            print(f"[Memory] chunk={result['chunk_id']}, candidates={result['candidates']}, committed={result['committed']}")
+        except Exception as mem_err:
+            print(f"[Memory] Error: {mem_err}")
         
         return jsonify({
             'response': response,
@@ -409,23 +275,25 @@ def handle_command(cmd):
 • `/help` - Ta lista"""
     
     if cmd_name == '/memory':
-        entries = get_user_memory_entries(current_user)
+        entries = mm.get_memory_entries(current_user.id)
         if not entries:
             return "Nie mam jeszcze żadnych zapisanych informacji o Tobie."
         
         result = ["**Co o Tobie pamiętam:**\n"]
-        by_tag = {}
+        by_type = {}
         for e in entries:
-            tag = e['tag']
-            if tag not in by_tag:
-                by_tag[tag] = []
-            by_tag[tag].append(e['text'])
+            t = e['type']
+            if t not in by_type:
+                by_type[t] = []
+            by_type[t].append(e)
         
-        tag_names = {'FACT': 'Fakty', 'PREF': 'Preferencje', 'TODO': 'Zadania', 'DECISION': 'Decyzje'}
-        for tag, texts in by_tag.items():
-            result.append(f"**{tag_names.get(tag, tag)}:**")
-            for text in texts:
-                result.append(f"• {text}")
+        type_names = {'fact': 'Fakty', 'pref': 'Preferencje', 'todo': 'Zadania', 
+                      'decision': 'Decyzje', 'procedure': 'Procedury', 'definition': 'Definicje'}
+        for t, facts in by_type.items():
+            result.append(f"**{type_names.get(t, t)}:**")
+            for f in facts:
+                pin = "📌 " if f.get('pinned') else ""
+                result.append(f"• {pin}{f['text']}")
             result.append("")
         
         return "\n".join(result)
@@ -433,14 +301,13 @@ def handle_command(cmd):
     if cmd_name == '/forget':
         if not cmd_arg:
             return "Podaj co mam zapomnieć, np: /forget trading"
-        count = delete_memory_by_keyword(current_user, cmd_arg)
+        count = mm.delete_facts_by_keyword(current_user.id, cmd_arg)
         if count > 0:
             return f"Zapomniałem {count} rzeczy związanych z \"{cmd_arg}\"."
         return f"Nie znalazłem nic związanego z \"{cmd_arg}\" w mojej pamięci."
     
     if cmd_name == '/forget-all':
-        current_user.memory = "# Log pamięci Przemusia\n\n"
-        db.session.commit()
+        mm.clear_all_memory(current_user.id)
         return "Wyczyściłem całą pamięć. Zaczynamy od nowa!"
     
     return f"Nieznana komenda: {cmd}"
@@ -451,84 +318,73 @@ def handle_command(cmd):
 @app.route('/api/memory', methods=['GET'])
 @login_required
 def api_get_memory():
-    """Pobiera wszystkie wpisy pamięci użytkownika."""
-    entries = get_user_memory_entries(current_user)
-    # Zwróć jako lista stringów z tagami
+    """Pobiera wszystkie wpisy pamięci użytkownika (nowy system)."""
+    entries = mm.get_memory_entries(current_user.id)
+    # Format kompatybilny wstecz: lista stringów z tagami
     result = []
     for e in entries:
-        result.append(f"[{e['tag']}] {e['text']}")
-    return jsonify({'entries': result})
+        pin = "📌 " if e.get('pinned') else ""
+        result.append(f"[{e['type'].upper()}] {pin}{e['text']}")
+    return jsonify({'entries': result, 'facts': entries})
 
 
 @app.route('/api/memory', methods=['PUT'])
 @login_required
 def api_update_memory():
-    """Aktualizuje wpis pamięci po indeksie."""
+    """Aktualizuje fakt po ID."""
     data = request.json
-    idx = data.get('index')
-    new_content = data.get('content', '')
+    fact_id = data.get('id') or data.get('index')  # kompatybilność wsteczna
+    new_text = data.get('text') or data.get('content', '')
+    new_pinned = data.get('pinned')
     
-    entries = get_user_memory_entries(current_user)
-    if idx < 0 or idx >= len(entries):
-        return jsonify({'error': 'Invalid index'}), 400
+    if fact_id is None:
+        return jsonify({'error': 'Missing id'}), 400
     
-    # Odbuduj pamięć z aktualizacją
-    lines = current_user.memory.split('\n')
-    new_lines = []
-    entry_idx = 0
+    # Jeśli podano index zamiast ID, skonwertuj
+    if data.get('index') is not None and data.get('id') is None:
+        entries = mm.get_memory_entries(current_user.id)
+        idx = int(data['index'])
+        if idx < 0 or idx >= len(entries):
+            return jsonify({'error': 'Invalid index'}), 400
+        fact_id = entries[idx]['id']
     
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith('[') and any(stripped.startswith(f'[{t}]') for t in ['FACT', 'PREF', 'TODO', 'DECISION']):
-            if entry_idx == idx:
-                new_lines.append(new_content)
-            else:
-                new_lines.append(line)
-            entry_idx += 1
-        else:
-            new_lines.append(line)
-    
-    current_user.memory = '\n'.join(new_lines)
-    db.session.commit()
-    return jsonify({'status': 'ok'})
+    success = mm.update_fact(int(fact_id), current_user.id, 
+                            new_text=new_text if new_text else None,
+                            new_pinned=new_pinned)
+    if success:
+        return jsonify({'status': 'ok'})
+    return jsonify({'error': 'Not found'}), 404
 
 
 @app.route('/api/memory', methods=['DELETE'])
 @login_required
 def api_delete_memory():
-    """Usuwa wpis pamięci po indeksie."""
+    """Usuwa fakt po ID."""
     data = request.json
-    idx = data.get('index')
+    fact_id = data.get('id') or data.get('index')  # kompatybilność wsteczna
     
-    entries = get_user_memory_entries(current_user)
-    if idx < 0 or idx >= len(entries):
-        return jsonify({'error': 'Invalid index'}), 400
+    if fact_id is None:
+        return jsonify({'error': 'Missing id'}), 400
     
-    # Odbuduj pamięć bez usuniętego wpisu
-    lines = current_user.memory.split('\n')
-    new_lines = []
-    entry_idx = 0
+    # Jeśli podano index zamiast ID, skonwertuj
+    if data.get('index') is not None and data.get('id') is None:
+        entries = mm.get_memory_entries(current_user.id)
+        idx = int(data['index'])
+        if idx < 0 or idx >= len(entries):
+            return jsonify({'error': 'Invalid index'}), 400
+        fact_id = entries[idx]['id']
     
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith('[') and any(stripped.startswith(f'[{t}]') for t in ['FACT', 'PREF', 'TODO', 'DECISION']):
-            if entry_idx != idx:
-                new_lines.append(line)
-            entry_idx += 1
-        else:
-            new_lines.append(line)
-    
-    current_user.memory = '\n'.join(new_lines)
-    db.session.commit()
-    return jsonify({'status': 'ok'})
+    success = mm.delete_fact(int(fact_id), current_user.id)
+    if success:
+        return jsonify({'status': 'ok'})
+    return jsonify({'error': 'Not found'}), 404
 
 
 @app.route('/api/memory/clear', methods=['POST'])
 @login_required
 def api_clear_memory():
     """Czyści całą pamięć użytkownika."""
-    current_user.memory = "# Log pamięci Przemusia\n\n"
-    db.session.commit()
+    mm.clear_all_memory(current_user.id)
     return jsonify({'status': 'ok'})
 
 
